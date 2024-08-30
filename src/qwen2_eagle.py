@@ -1,8 +1,8 @@
 import os
+import time
 import torch
 import numpy as np
 import argparse
-import time
 from mp_utils import choices, format_example, gen_prompt, softmax, run_eval
 from tqdm import tqdm
 from collections import defaultdict
@@ -25,19 +25,35 @@ def is_eval_success(args) -> bool:
             return False
     return True
 
-
+@torch.inference_mode()
 def init_model(args):
     """Initialize models"""
+    from eagle.model.ea_model import EaModel
+    from fastchat.model import get_conversation_template
+    base_model_path = "/root/autodl-fs/Qwen2-7B-Instruct"
+    EAGLE_model_path = "/root/autodl-fs/yuhuili/EAGLE-Qwen2-7B-Instruct"
+
+
+    model = EaModel.from_pretrained(
+        base_model_path=base_model_path,
+        ea_model_path=EAGLE_model_path,
+        torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+        device_map="auto",
+        total_token=-1
+    )
+    print(f'model.base_model.device:{model.base_model.device}')
+    """
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         trust_remote_code=True,
         device_map="auto",
         torch_dtype=torch.float16,
     )
+    """
     model.generation_config = GenerationConfig.from_pretrained(
         args.model_name_or_path, trust_remote_code=True
     )
-    print(f'model device:{model.device}')
     return model
 
 
@@ -90,6 +106,7 @@ def eval_instruct(
     cors = []
     all_preds = []
     answers = choices[: test_df.shape[1] - 2]
+
     records = []
     detail_records = []
     for i in tqdm(range(test_df.shape[0])):
@@ -110,25 +127,27 @@ def eval_instruct(
             tokenize=False,
             add_generation_prompt=True,
         )
-        model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+        model_inputs = tokenizer([text], return_tensors="pt").to(model.base_model.device)
         start_time = time.time()
 
         torch.cuda.synchronize()
 
-        generated_ids = model.generate(model_inputs.input_ids, max_new_tokens=512)
+        generated_ids, new_tokens, idx = model.eagenerate(model_inputs.input_ids, max_new_tokens=512, log=True)
         total_time = time.time() - start_time
 
+        detail_records.append(f'{new_tokens}/{total_time}')
         generated_ids = [
             output_ids[len(input_ids) :]
             for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
         ]
         #print(f'generated_ids[0]:{generated_ids[0]}')
-        detail_records.append(f'{len(generated_ids[0])}/{total_time}')
-        records.append(len(generated_ids[0]) / total_time)
+        #records.append(f'{len(generated_ids[0])}/{total_time}')
+        records.append(len(generated_ids[0])/total_time)
         pred = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
         #print(f'pred:{pred} len:{len(pred)}')
-
         # pred, history = model.chat(tokenizer, prompt, history=None)
+
+
 
         if pred and pred[0] in choices:
             cors.append(pred[0] == label)
@@ -142,9 +161,12 @@ def eval_instruct(
             len(cors), len(all_preds) - len(cors)
         )
     )
+    print(records)
 
-    mean_speed = np.array(records).mean()
+    mean_speed = np.array([record for record in records]).mean()
+
     return acc, all_preds, None, mean_speed
+
 
 subcategories = {
     "agronomy": ["other"],
@@ -265,7 +287,7 @@ if __name__ == "__main__":
     #parser.add_argument("--model_name_or_path", type=str, default="")
     parser.add_argument("--model_name_or_path", type=str, default="/root/autodl-fs/Qwen2-7B-Instruct")
     parser.add_argument("--data_dir", type=str, default="../data")
-    parser.add_argument("--save_dir", type=str, default="../results/Qwen2-7B-Chat")
+    parser.add_argument("--save_dir", type=str, default="../results/Qwen2-7B-Chat-Eagel")
     parser.add_argument("--num_few_shot", type=int, default=0)
     parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--cot", action="store_true")
@@ -284,3 +306,4 @@ if __name__ == "__main__":
         run_eval(model, tokenizer, eval_instruct, total, args)
     else:
         run_eval(model, tokenizer, eval, args)
+

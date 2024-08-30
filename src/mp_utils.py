@@ -76,24 +76,31 @@ def softmax(x):
     return softmax
 
 
-def run_eval(model, tokenizer, eval, args):
+def run_eval(model, tokenizer, eval, total_subjects, args):
 
     if model:
         model.eval()
 
     subjects=sorted([f.split(".csv")[0] for f in os.listdir(os.path.join(args.data_dir, "test/"))])
+    print(f'len of subjects:{len(subjects)}')
+
     args.save_dir = f"{args.save_dir}_{args.num_few_shot}_shot"
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-
+    print(f'subjects：{subjects}')
+    print(f'total_subjects：{total_subjects}')
+    print(f'total_subjects len ：{len(total_subjects)}')
+    record_dict = {}
     for subject in subjects:
+        if subject not in total_subjects:
+            continue
         out_file = os.path.join(args.save_dir, f"results_{subject}.csv")
         if os.path.exists(out_file):  # If result file exist, skip this subject
-            continue
+            os.remove(out_file)
         dev_df = pd.read_csv(os.path.join(args.data_dir, "dev", subject + ".csv"), header=0, index_col=0)
         test_df = pd.read_csv(os.path.join(args.data_dir, "test", subject + ".csv"), header=0, index_col=0)
 
-        acc, preds, confs = eval(model=model,
+        acc, preds, confs, mean_speed = eval(model=model,
                                  tokenizer=tokenizer,
                                  subject=subject,
                                  dev_df=dev_df,
@@ -106,10 +113,24 @@ def run_eval(model, tokenizer, eval, args):
             test_df['conf'] = confs
 
         test_df.to_csv(out_file, header=None)
-
+        record_dict[subject] = {}
+        record_dict[subject]['speed'] = mean_speed
+        record_dict[subject]['acc'] = acc
     # print result
     get_results(args.save_dir)
+    print(f'record_dict:{record_dict}')
 
+    #mean speed and mean acc
+    total_mean_speed = np.array([v['speed'] for k,v in record_dict.items()]).mean()
+    total_mean_acc = np.array([v['acc'] for k, v in record_dict.items()]).mean()
+    print(f'total_mean_speed:{total_mean_speed}')
+    print(f'total_mean_acc:{total_mean_acc}')
+    with open("record", 'a') as f:
+        f.writelines(str(record_dict))
+        f.writelines("  total_mean_speed  ")
+        f.writelines(str(total_mean_speed))
+        f.writelines("  total_mean_acc  ")
+        f.writelines(str(total_mean_acc))
 
 def extract_choice(response):
     '''
@@ -182,11 +203,13 @@ def get_results(result_dir=''):
 
     all_acc = defaultdict(float)
     all_df = []
+    skip_cnt = 0
     for subject in name_en2zh.keys():
         try:
             file = glob.glob(osp.join(result_dir, f"results_{subject}.csv"))[0]
         except:
-            print(f"Warning, {subject} result file not found")
+            #print(f"Warning, {subject} result file not found")
+            skip_cnt += 1
             continue
         df = pd.read_csv(file, names=['id','question','A','B','C','D','answer','response'], index_col=0)
         # To deal with some mismath between data and answer
@@ -197,7 +220,7 @@ def get_results(result_dir=''):
         acc = np.mean(df['acc']) * 100
         all_acc[subject]=acc
         all_df.append(df)
-
+    print(f'skip_cnt:{skip_cnt}')
     all_df = pd.concat(all_df)
     for k, v in category2subject.items():
         avg_acc = np.mean(list(map(lambda x: all_acc[x], v)))
