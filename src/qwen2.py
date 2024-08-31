@@ -28,11 +28,14 @@ def is_eval_success(args) -> bool:
 
 def init_model(args):
     """Initialize models"""
+    torch.cuda.empty_cache()
+    #os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    device = args.device
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         trust_remote_code=True,
-        device_map="auto",
-        torch_dtype=torch.float16,
+        device_map=device,
+        torch_dtype=torch.bfloat16,
     )
     model.generation_config = GenerationConfig.from_pretrained(
         args.model_name_or_path, trust_remote_code=True
@@ -92,6 +95,7 @@ def eval_instruct(
     answers = choices[: test_df.shape[1] - 2]
     records = []
     detail_records = []
+
     for i in tqdm(range(test_df.shape[0])):
         prompt_end = format_example(test_df, i, subject, include_answer=False, cot=cot)
         prompt = gen_prompt(
@@ -113,7 +117,7 @@ def eval_instruct(
         model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
         start_time = time.time()
 
-        torch.cuda.synchronize()
+        #torch.cuda.synchronize()
 
         generated_ids = model.generate(model_inputs.input_ids, max_new_tokens=512)
         total_time = time.time() - start_time
@@ -133,6 +137,8 @@ def eval_instruct(
         if pred and pred[0] in choices:
             cors.append(pred[0] == label)
         all_preds.append(pred.replace("\n", ""))
+        if i > int(args.loopcnt):
+            break
     print(f'records:{records}')
     print(f'detail_records:{detail_records}')
     acc = np.mean(cors)
@@ -246,7 +252,7 @@ for k,v in TASK_NAME_MAPPING.items():
     for item in v:
         total.append(item)
 total = list(set(total))
-total =  [
+total = [
     "chinese_foreign_policy",
     "college_law",
     "food_science",
@@ -258,6 +264,7 @@ total =  [
     "high_school_geography",
     "machine_learning"
 ]
+total = ['sociology']
 print(f'len  total:{len(total)}')
 
 if __name__ == "__main__":
@@ -269,8 +276,14 @@ if __name__ == "__main__":
     parser.add_argument("--num_few_shot", type=int, default=0)
     parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--cot", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--filter", default=False, help="do filter or not", action='store_true')
+    parser.add_argument("--loopcnt", type=int, default=1)
 
+    args = parser.parse_args()
+    print(f'args.device:{args.device}')
+    print(f'args.filter:{args.filter}')
+    print(f'args.loopcnt:{args.loopcnt}')
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path, trust_remote_code=True
     )

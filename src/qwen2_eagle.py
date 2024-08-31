@@ -33,14 +33,14 @@ def init_model(args):
     base_model_path = "/root/autodl-fs/Qwen2-7B-Instruct"
     EAGLE_model_path = "/root/autodl-fs/yuhuili/EAGLE-Qwen2-7B-Instruct"
 
-
+    device = args.device
     model = EaModel.from_pretrained(
         base_model_path=base_model_path,
         ea_model_path=EAGLE_model_path,
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
-        device_map="auto",
-        total_token=-1
+        device_map=device,
+        #total_token=-1
     )
     print(f'model.base_model.device:{model.base_model.device}')
     """
@@ -130,12 +130,12 @@ def eval_instruct(
         model_inputs = tokenizer([text], return_tensors="pt").to(model.base_model.device)
         start_time = time.time()
 
-        torch.cuda.synchronize()
+        #torch.cuda.synchronize()
 
-        generated_ids, new_tokens, idx = model.eagenerate(model_inputs.input_ids, max_new_tokens=512, log=True)
+        generated_ids = model.eagenerate(model_inputs.input_ids, max_new_tokens=512)
         total_time = time.time() - start_time
 
-        detail_records.append(f'{new_tokens}/{total_time}')
+        #detail_records.append(f'{new_tokens}/{total_time}')
         generated_ids = [
             output_ids[len(input_ids) :]
             for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
@@ -152,8 +152,10 @@ def eval_instruct(
         if pred and pred[0] in choices:
             cors.append(pred[0] == label)
         all_preds.append(pred.replace("\n", ""))
+        if i > int(args.loopcnt):
+            break
     print(f'records:{records}')
-    print(f'detail_records:{detail_records}')
+    #print(f'detail_records:{detail_records}')
     acc = np.mean(cors)
     print("Average accuracy {:.3f} - {}".format(acc, subject))
     print(
@@ -280,6 +282,7 @@ total =  [
     "high_school_geography",
     "machine_learning"
 ]
+total = ['sociology']
 print(f'len  total:{len(total)}')
 
 if __name__ == "__main__":
@@ -291,7 +294,14 @@ if __name__ == "__main__":
     parser.add_argument("--num_few_shot", type=int, default=0)
     parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--cot", action="store_true")
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--filter", default=False, help="do filter or not", action='store_true')
+    parser.add_argument("--loopcnt", type=int, default=1)
+
     args = parser.parse_args()
+    print(f'args.device:{args.device}')
+    print(f'args.filter:{args.filter}')
+    print(f'args.loopcnt:{args.loopcnt}')
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path, trust_remote_code=True

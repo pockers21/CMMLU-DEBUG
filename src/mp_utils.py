@@ -92,8 +92,9 @@ def run_eval(model, tokenizer, eval, total_subjects, args):
     print(f'total_subjects len ：{len(total_subjects)}')
     record_dict = {}
     for subject in subjects:
-        if subject not in total_subjects:
-            continue
+        if args.filter:
+            if subject not in total_subjects:
+                continue
         out_file = os.path.join(args.save_dir, f"results_{subject}.csv")
         if os.path.exists(out_file):  # If result file exist, skip this subject
             os.remove(out_file)
@@ -108,7 +109,7 @@ def run_eval(model, tokenizer, eval, total_subjects, args):
                                  num_few_shot=args.num_few_shot,
                                  max_length=args.max_length,
                                  cot=args.cot if 'cot' in args else False)
-        test_df['prediction'] = preds
+        #test_df['prediction'] = preds
         if 'with_conf' in args and args.with_conf:
             test_df['conf'] = confs
 
@@ -126,11 +127,12 @@ def run_eval(model, tokenizer, eval, total_subjects, args):
     print(f'total_mean_speed:{total_mean_speed}')
     print(f'total_mean_acc:{total_mean_acc}')
     with open("record", 'a') as f:
-        f.writelines(str(record_dict))
-        f.writelines("  total_mean_speed  ")
-        f.writelines(str(total_mean_speed))
-        f.writelines("  total_mean_acc  ")
-        f.writelines(str(total_mean_acc))
+        f.writelines("\n")
+        f.writelines(str(record_dict) + "\n")
+        f.writelines("  total_mean_speed  " + "\n")
+        f.writelines(str(total_mean_speed) + "\n")
+        f.writelines("  total_mean_acc  " + "\n")
+        f.writelines(str(total_mean_acc) + "\n")
 
 def extract_choice(response):
     '''
